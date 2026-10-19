@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Show a live diff of the files a coding agent has edited.
+# Usage: agent-diff STATE_DIR
+#
+# STATE_DIR/files lists one absolute path per line. The diff is redrawn
+# each time STATE_DIR/trigger changes. agent-diff-hook writes both.
+set -uo pipefail
+
+state=$1
+
+if command -v delta >/dev/null; then
+  pager=(delta --paging=never)
+else
+  pager=(cat)
+fi
+
+# Diff one file against HEAD, or against nothing if git doesn't track it.
+diff_file() {
+  local file=$1 dir
+  dir=$(dirname "$file")
+  if git -C "$dir" ls-files --error-unmatch -- "$file" >/dev/null 2>&1; then
+    git -C "$dir" diff --color=always HEAD -- "$file"
+  elif [[ -e "$file" ]]; then
+    (cd "$dir" && git diff --color=always --no-index -- /dev/null "$(basename "$file")")
+  fi
+}
+
+render() {
+  local files
+  files=$(sort -u "$state/files" 2>/dev/null)
+  printf 'agent diff: %d file(s)\n\n' "$(grep -c . <<<"$files")"
+  while IFS= read -r file; do
+    [[ -n "$file" ]] && diff_file "$file"
+  done <<<"$files"
+}
+
+last=
+while :; do
+  current=$(cat "$state/trigger" 2>/dev/null)
+  if [[ "$current" != "$last" ]]; then
+    last=$current
+    clear
+    render | "${pager[@]}"
+  fi
+  sleep 0.5
+done
