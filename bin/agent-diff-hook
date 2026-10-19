@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Claude Code hook: show the files Claude edits in a Rex diff pane.
+#
+#   PostToolUse (Edit|Write|MultiEdit)  record the file, open the pane once
+#
+# Does nothing outside a Rex terminal.
+set -euo pipefail
+
+[[ -n "${REX_BLOCK:-}" ]] || exit 0
+
+input=$(cat)
+state="${TMPDIR:-/tmp}/rex-agent-diff/${REX_BLOCK##*:}"
+mkdir -p "$state"
+
+file=$(jq -r '.tool_input.file_path // empty' <<<"$input")
+[[ -n "$file" ]] || exit 0
+echo "$file" >>"$state/files"
+
+# Open the pane unless it is already open. The lock stops parallel edits
+# from opening two panes; a hook that loses the race skips this step.
+if mkdir "$state/lock" 2>/dev/null; then
+  trap 'rmdir "$state/lock"' EXIT
+  pane=$(cat "$state/pane" 2>/dev/null || true)
+  if [[ -z "$pane" ]] || ! rex block inspect "$pane" >/dev/null 2>&1; then
+    rex split -b "$REX_BLOCK" --focus=false --ratio 45 --label agent-diff --json \
+      -c "$(jq -r '.cwd' <<<"$input")" \
+      -- "$(dirname "$0")/agent-diff" "$state" |
+      jq -r '.block_ids[0]' >"$state/pane"
+  fi
+fi
+
+echo "$RANDOM$$" >"$state/trigger"
