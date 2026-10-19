@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Pick a bin or bench target in the current Cargo workspace and run it.
+# Launched by the cmd+r binding in ~/.config/rex/init.lua.
+set -euo pipefail
+
+meta=$(cargo metadata --no-deps --format-version 1)
+
+# One line per target: kind<TAB>package<TAB>target<TAB>display
+targets=$(jq -r '
+  .packages[] as $p
+  | $p.targets[]
+  | .name as $t
+  | .kind[]
+  | select(. == "bin" or . == "bench")
+  | [., $p.name, $t] | @tsv
+' <<<"$meta" | sort | awk -F'\t' '{ printf "%s\t%s\t%s\t%-6s %-32s %s\n", $1, $2, $3, $1, $3, $2 }')
+
+if [[ -z "$targets" ]]; then
+  echo "No bin or bench targets found."
+  exit 1
+fi
+
+choice=$(fzf --delimiter='\t' --with-nth=4 --prompt='cargo> ' \
+  --header="$(printf '%-6s %-32s %s' kind target package)" <<<"$targets") || exit 0
+
+IFS=$'\t' read -r kind pkg target _ <<<"$choice"
+case "$kind" in
+  bin)   cmd=(cargo run   -p "$pkg" --bin   "$target") ;;
+  bench) cmd=(cargo bench -p "$pkg" --bench "$target") ;;
+esac
+
+echo "\$ ${cmd[*]}"
+"${cmd[@]}" || true
+
+# Keep the pane open with a shell so the output stays visible.
+exec "${SHELL:-/bin/zsh}" -l
