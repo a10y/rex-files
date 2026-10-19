@@ -2,6 +2,7 @@
 # Claude Code hook: show the files Claude edits in a Rex diff pane.
 #
 #   PostToolUse (Edit|Write|MultiEdit)  record the file, open the pane once
+#   SessionEnd                          close the pane, forget the files
 #
 # Does nothing outside a Rex terminal.
 set -euo pipefail
@@ -11,6 +12,13 @@ set -euo pipefail
 input=$(cat)
 state="${TMPDIR:-/tmp}/rex-agent-diff/${REX_BLOCK##*:}"
 mkdir -p "$state"
+
+if [[ "$(jq -r '.hook_event_name' <<<"$input")" == SessionEnd ]]; then
+  pane=$(cat "$state/pane" 2>/dev/null || true)
+  [[ -n "$pane" ]] && rex block close "$pane" >/dev/null 2>&1 || true
+  rm -rf "$state"
+  exit 0
+fi
 
 file=$(jq -r '.tool_input.file_path // empty' <<<"$input")
 [[ -n "$file" ]] || exit 0
